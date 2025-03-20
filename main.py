@@ -1,4 +1,6 @@
 # main.py
+import sqlite3
+
 from database import create_connection
 import datetime
 
