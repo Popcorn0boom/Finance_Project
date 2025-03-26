@@ -9,6 +9,7 @@ from main import (add_transaction, get_budget_alert_status,
                   show_summary, set_budget_alert, set_salary)
 import threading
 
+
 class FinanceApp:
     def __init__(self, root):
         self.root = root
@@ -99,62 +100,179 @@ class FinanceApp:
                 f"预算金额：¥{alert_status['budget']:.2f}"
             )
 
+    # def load_recent_transactions(self, limit=20):
+    #     """ 加载最近交易记录 """
+    #     for row in self.tree.get_children():
+    #         self.tree.delete(row)
+    #
+    #     cur = self.conn.cursor()
+    #     cur.execute('''SELECT id, date, type, amount, category
+    #                  FROM transactions ORDER BY date DESC LIMIT ?''', (limit,))
+    #
+    #     for row in cur.fetchall():
+    #         self.tree.insert("", tk.END, values=row)
+
     def load_recent_transactions(self, limit=20):
-        """ 加载最近交易记录 """
-        for row in self.tree.get_children():
-            self.tree.delete(row)
+        try:
+            # 使用临时连接确保数据最新
+            temp_conn = create_connection()
+            cur = temp_conn.cursor()
+            cur.execute('''
+                SELECT id, date, type, amount, category 
+                FROM transactions 
+                ORDER BY date DESC 
+                LIMIT ?
+            ''', (limit,))
 
-        cur = self.conn.cursor()
-        cur.execute('''SELECT id, date, type, amount, category 
-                     FROM transactions ORDER BY date DESC LIMIT ?''', (limit,))
+            # 清空表格
+            self.tree.delete(*self.tree.get_children())
 
-        for row in cur.fetchall():
-            self.tree.insert("", tk.END, values=row)
+            # 插入新数据
+            for row in cur.fetchall():
+                self.tree.insert("", tk.END, values=(
+                    row[0],  # ID
+                    row[1],  # Date
+                    "收入" if row[2] == "income" else "支出",  # Type
+                    f"¥{row[3]:.2f}",  # Amount
+                    row[4]  # Category
+                ))
+
+            # 自动调整列宽
+            for col in self.tree["columns"]:
+                self.tree.column(col, width=tkfont.Font().measure(col) + 20)
+
+        except sqlite3.Error as e:
+            messagebox.showerror("数据库错误", f"加载失败:\n{str(e)}")
+        except Exception as e:
+            messagebox.showerror("错误", f"未知错误:\n{str(e)}")
+        finally:
+            if temp_conn:
+                temp_conn.close()
+
+    # def show_add_dialog(self):
+    #     """ 显示添加记录对话框 """
+    #     dialog = tk.Toplevel(self.root)
+    #     dialog.title("添加新记录")
+    #
+    #     # 表单字段
+    #     ttk.Label(dialog, text="日期:").grid(row=0, column=0, padx=5, pady=5)
+    #     date_entry = DateEntry(dialog, date_pattern="y-mm-dd")
+    #     date_entry.grid(row=0, column=1, padx=5)
+    #
+    #     ttk.Label(dialog, text="类型:").grid(row=1, column=0)
+    #     type_var = tk.StringVar()
+    #     ttk.Combobox(dialog, textvariable=type_var,
+    #                  values=["income", "expense"]).grid(row=1, column=1)
+    #
+    #     ttk.Label(dialog, text="金额:").grid(row=2, column=0)
+    #     amount_entry = ttk.Entry(dialog)
+    #     amount_entry.grid(row=2, column=1)
+    #
+    #     ttk.Label(dialog, text="分类:").grid(row=3, column=0)
+    #     category_entry = ttk.Entry(dialog)
+    #     category_entry.grid(row=3, column=1)
+    #
+    #     ttk.Label(dialog, text="备注:").grid(row=4, column=0)
+    #     desc_entry = ttk.Entry(dialog)
+    #     desc_entry.grid(row=4, column=1)
+    #
+    #     # 提交按钮
+    #     # def submit():
+    #     #     data = {
+    #     #         "date": date_entry.get(),
+    #     #         "type": type_var.get().lower(),
+    #     #         "amount": amount_entry.get(),
+    #     #         "category": category_entry.get(),
+    #     #         "description": desc_entry.get()
+    #     #     }
+    #     #     if add_transaction(self.conn, auto=False, auto_data=data):
+    #     #         self.load_recent_transactions()
+    #     #         self.status_var.set("记录添加成功！")
+    #     #         dialog.destroy()
+    #     #         self.check_budget_alert()
+    #
+    #     def submit():
+    #         # 获取输入数据
+    #         data = {
+    #             "date": date_entry.get(),
+    #             "type": type_var.get().lower(),
+    #             "amount": amount_entry.get(),
+    #             "category": category_entry.get(),
+    #             "description": desc_entry.get()
+    #         }
+    #
+    #         # 禁用提交按钮避免重复点击
+    #         submit_btn.config(state=tk.DISABLED)
+    #         self.status_var.set("正在保存...")
+    #
+    #         def db_operation():
+    #             """ 在后台线程执行的数据库操作 """
+    #             try:
+    #                 # 在子线程中创建独立连接（重要！）
+    #                 thread_conn = create_connection()
+    #                 if add_transaction(thread_conn, auto=False, auto_data=data):
+    #                     # 操作成功后更新UI（必须通过主线程）
+    #                     self.root.after(0, lambda: self.on_add_success(thread_conn))
+    #                 else:
+    #                     self.root.after(0, lambda: self.on_add_failure("添加失败"))
+    #             except Exception as e:
+    #                 self.root.after(0, lambda: self.on_add_failure(str(e)))
+    #             finally:
+    #                 if thread_conn:
+    #                     thread_conn.close()
+    #
+    #         # 启动后台线程
+    #         threading.Thread(target=db_operation, daemon=True).start()
+    #
+    #     # 在 dialog 中添加提交按钮时保留引用
+    #     submit_btn = ttk.Button(dialog, text="提交", command=submit)
+    #     submit_btn.grid(row=5, columnspan=2, pady=10)
+    #
+    #     ttk.Button(dialog, text="提交", command=submit).grid(row=5, columnspan=2, pady=10)
 
     def show_add_dialog(self):
-        """ 显示添加记录对话框 """
         dialog = tk.Toplevel(self.root)
-        dialog.title("添加新记录")
+        dialog.title("添加记录")
+        dialog.grab_set()  # 设为模态对话框
 
-        # 表单字段
+        # 日期控件
         ttk.Label(dialog, text="日期:").grid(row=0, column=0, padx=5, pady=5)
         date_entry = DateEntry(dialog, date_pattern="y-mm-dd")
         date_entry.grid(row=0, column=1, padx=5)
 
+        # 类型选择
         ttk.Label(dialog, text="类型:").grid(row=1, column=0)
         type_var = tk.StringVar()
-        ttk.Combobox(dialog, textvariable=type_var,
-                     values=["income", "expense"]).grid(row=1, column=1)
+        type_combo = ttk.Combobox(dialog, textvariable=type_var,
+                                  values=["income", "expense"], state="readonly")
+        type_combo.grid(row=1, column=1)
+        type_combo.current(0)
 
+        # 金额输入
         ttk.Label(dialog, text="金额:").grid(row=2, column=0)
         amount_entry = ttk.Entry(dialog)
         amount_entry.grid(row=2, column=1)
 
+        # 分类输入
         ttk.Label(dialog, text="分类:").grid(row=3, column=0)
         category_entry = ttk.Entry(dialog)
         category_entry.grid(row=3, column=1)
 
+        # 备注输入
         ttk.Label(dialog, text="备注:").grid(row=4, column=0)
         desc_entry = ttk.Entry(dialog)
         desc_entry.grid(row=4, column=1)
 
-        # 提交按钮
-        # def submit():
-        #     data = {
-        #         "date": date_entry.get(),
-        #         "type": type_var.get().lower(),
-        #         "amount": amount_entry.get(),
-        #         "category": category_entry.get(),
-        #         "description": desc_entry.get()
-        #     }
-        #     if add_transaction(self.conn, auto=False, auto_data=data):
-        #         self.load_recent_transactions()
-        #         self.status_var.set("记录添加成功！")
-        #         dialog.destroy()
-        #         self.check_budget_alert()
+        # 状态标签
+        status_label = ttk.Label(dialog, text="")
+        status_label.grid(row=6, columnspan=2)
 
         def submit():
-            # 获取输入数据
+            # 禁用按钮避免重复提交
+            submit_btn.config(state=tk.DISABLED)
+            status_label.config(text="保存中...", foreground="black")
+
+            # 获取数据
             data = {
                 "date": date_entry.get(),
                 "type": type_var.get().lower(),
@@ -163,34 +281,35 @@ class FinanceApp:
                 "description": desc_entry.get()
             }
 
-            # 禁用提交按钮避免重复点击
-            submit_btn.config(state=tk.DISABLED)
-            self.status_var.set("正在保存...")
-
-            def db_operation():
-                """ 在后台线程执行的数据库操作 """
+            def db_task():
+                """ 后台数据库任务 """
                 try:
-                    # 在子线程中创建独立连接（重要！）
-                    thread_conn = create_connection()
-                    if add_transaction(thread_conn, auto=False, auto_data=data):
-                        # 操作成功后更新UI（必须通过主线程）
-                        self.root.after(0, lambda: self.on_add_success(thread_conn))
-                    else:
-                        self.root.after(0, lambda: self.on_add_failure("添加失败"))
+                    # 使用独立连接
+                    success = add_transaction(auto=True, auto_data=data)
+                    self.root.after(0, lambda: on_success(success))
                 except Exception as e:
-                    self.root.after(0, lambda: self.on_add_failure(str(e)))
-                finally:
-                    if thread_conn:
-                        thread_conn.close()
+                    self.root.after(0, lambda: on_error(str(e)))
 
-            # 启动后台线程
-            threading.Thread(target=db_operation, daemon=True).start()
+            def on_success(success):
+                if success:
+                    self.load_recent_transactions()
+                    status_label.config(text="保存成功！", foreground="green")
+                    dialog.after(1000, dialog.destroy)  # 1秒后自动关闭
+                    self.check_budget_alert()
+                else:
+                    status_label.config(text="保存失败", foreground="red")
+                    submit_btn.config(state=tk.NORMAL)
 
-        # 在 dialog 中添加提交按钮时保留引用
+            def on_error(error_msg):
+                status_label.config(text=f"错误: {error_msg}", foreground="red")
+                submit_btn.config(state=tk.NORMAL)
+
+            # 启动线程
+            threading.Thread(target=db_task, daemon=True).start()
+
+        # 提交按钮
         submit_btn = ttk.Button(dialog, text="提交", command=submit)
         submit_btn.grid(row=5, columnspan=2, pady=10)
-
-        ttk.Button(dialog, text="提交", command=submit).grid(row=5, columnspan=2, pady=10)
 
     def show_monthly_summary(self):
         """ 显示本月统计摘要 """
@@ -281,21 +400,21 @@ class FinanceApp:
 
         ttk.Button(dialog, text="保存", command=save_budget).grid(row=1, columnspan=2)
 
-    def on_add_success(self, thread_conn):
-        """ 添加成功后的UI更新 """
-        # 刷新主连接的数据（确保数据一致性）
-        self.conn.commit()  # 如果使用连接池可能需要其他处理
-        self.load_recent_transactions()
-        self.status_var.set("记录添加成功！")
-        # 重新启用按钮
-        self.show_add_dialog.dialog.submit_btn.config(state=tk.NORMAL)
-        self.check_budget_alert()
-
-    def on_add_failure(self, error_msg):
-        """ 添加失败处理 """
-        messagebox.showerror("错误", f"保存失败: {error_msg}")
-        self.status_var.set("保存失败")
-        self.show_add_dialog.dialog.submit_btn.config(state=tk.NORMAL)
+    # def on_add_success(self, thread_conn):
+    #     """ 添加成功后的UI更新 """
+    #     # 刷新主连接的数据（确保数据一致性）
+    #     self.conn.commit()  # 如果使用连接池可能需要其他处理
+    #     self.load_recent_transactions()
+    #     self.status_var.set("记录添加成功！")
+    #     # 重新启用按钮
+    #     self.show_add_dialog.dialog.submit_btn.config(state=tk.NORMAL)
+    #     self.check_budget_alert()
+    #
+    # def on_add_failure(self, error_msg):
+    #     """ 添加失败处理 """
+    #     messagebox.showerror("错误", f"保存失败: {error_msg}")
+    #     self.status_var.set("保存失败")
+    #     self.show_add_dialog.dialog.submit_btn.config(state=tk.NORMAL)
 
 if __name__ == "__main__":
     root = tk.Tk()

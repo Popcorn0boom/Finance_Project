@@ -4,104 +4,96 @@ from database import create_connection
 import datetime
 
 
-def add_transaction(conn, auto=False, auto_data=None):
+def add_transaction(conn=None, auto=False, auto_data=None):
     """
-    添加收支记录（支持手动和自动模式）
-
+    完整版添加记录函数（支持线程安全）
     参数:
-        conn: 数据库连接对象
-        auto: 是否为自动模式（True时跳过输入直接使用auto_data）
-        auto_data: 自动模式数据字典，格式:
-            {
-                'date': 'YYYY-MM-DD',
-                'type': 'income/expense',
-                'amount': float,
-                'category': str,
-                'description': str
-            }
+        conn: 可选，数据库连接对象（未提供时自动创建）
+        auto: 是否为自动模式
+        auto_data: 自动模式数据字典
+    返回: bool (是否成功)
     """
-
-    def validate_date(date_str):
-        """ 日期格式验证 """
-        try:
-            datetime.datetime.strptime(date_str, "%Y-%m-%d")
-            return True
-        except ValueError:
-            return False
-
-    # ====================
-    # 自动模式处理
-    # ====================
-    if auto:
-        if not auto_data or not all(key in auto_data for key in ['date', 'type', 'amount']):
-            print("自动添加失败：数据格式错误")
-            return False
-
-        try:
-            sql = '''INSERT INTO transactions(date, type, amount, category, description)
-                     VALUES(?,?,?,?,?)'''
-            cur = conn.cursor()
-            cur.execute(sql, (
-                auto_data['date'],
-                auto_data['type'],
-                auto_data['amount'],
-                auto_data.get('category', '未分类'),
-                auto_data.get('description', '')
-            ))
-            conn.commit()
-            return True
-        except sqlite3.Error as e:
-            print(f"自动添加失败: {e}")
-            conn.rollback()
-            return False
-
-    # ====================
-    # 手动输入模式
-    # ====================
-    print("\n--- 手动添加记录 ---")
-
-    # 1. 日期输入与验证
-    date_input = input("日期 (YYYY-MM-DD，留空使用今天): ").strip()
-    date = date_input if date_input else datetime.date.today().isoformat()
-
-    if not validate_date(date):
-        print("错误：日期格式必须为 YYYY-MM-DD（例如：2023-08-20）")
-        return False
-
-    # 2. 类型验证
-    trans_type = input("类型 (income/expense): ").strip().lower()
-    if trans_type not in ('income', 'expense'):
-        print("错误：类型必须为 income 或 expense")
-        return False
-
-    # 3. 金额验证
-    amount_input = input("金额: ").strip()
+    local_conn = None
     try:
-        amount = float(amount_input)
-        if amount <= 0:
-            print("错误：金额必须大于0")
-            return False
-    except ValueError:
-        print("错误：请输入有效的数字（例如：15.5）")
-        return False
+        # 处理数据库连接
+        if not conn:
+            local_conn = create_connection()
+            conn = local_conn
 
-    # 4. 可选字段处理
-    category = input("分类 (可选): ").strip() or "未分类"
-    description = input("备注 (可选): ").strip()
+        # === 数据验证 ===
+        if not auto:
+            # 手动模式验证
+            date_input = input("日期 (YYYY-MM-DD，留空使用今天): ").strip()
+            date = date_input if date_input else datetime.date.today().isoformat()
 
-    # 5. 写入数据库
-    try:
+            try:
+                datetime.datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                print("错误：日期格式必须为 YYYY-MM-DD")
+                return False
+
+            trans_type = input("类型 (income/expense): ").strip().lower()
+            if trans_type not in ('income', 'expense'):
+                print("错误：类型必须为 income 或 expense")
+                return False
+
+            amount_input = input("金额: ").strip()
+            try:
+                amount = float(amount_input)
+                if amount <= 0:
+                    print("错误：金额必须大于0")
+                    return False
+            except ValueError:
+                print("错误：请输入有效的数字")
+                return False
+
+            category = input("分类 (可选): ").strip() or "未分类"
+            description = input("备注 (可选): ").strip()
+        else:
+            # 自动模式验证
+            required_keys = ['date', 'type', 'amount']
+            if not all(k in auto_data for k in required_keys):
+                raise ValueError("自动模式数据缺失必要字段")
+
+            date = auto_data['date']
+            trans_type = auto_data['type']
+            amount = auto_data['amount']
+            category = auto_data.get('category', '未分类')
+            description = auto_data.get('description', '')
+
+            # 验证自动数据
+            try:
+                datetime.datetime.strptime(date, "%Y-%m-%d")
+                if trans_type not in ('income', 'expense'):
+                    raise ValueError
+                if float(amount) <= 0:
+                    raise ValueError
+            except:
+                raise ValueError("自动数据验证失败")
+
+        # === 数据库操作 ===
         sql = '''INSERT INTO transactions(date, type, amount, category, description)
                  VALUES(?,?,?,?,?)'''
         cur = conn.cursor()
         cur.execute(sql, (date, trans_type, amount, category, description))
-        conn.commit()
-        print(f"记录添加成功！ID: {cur.lastrowid}")
+
+        # 提交事务（如果是独立连接）
+        if local_conn:
+            conn.commit()
+
         return True
+
     except sqlite3.Error as e:
-        print(f"数据库错误: {e}")
-        conn.rollback()
-        return False
+        if local_conn:
+            conn.rollback()
+        raise Exception(f"数据库错误: {str(e)}")
+    except Exception as e:
+        if local_conn:
+            conn.rollback()
+        raise e
+    finally:
+        if local_conn:
+            local_conn.close()
 
 # def show_summary(conn):
 #     """ 显示本月汇总 """
