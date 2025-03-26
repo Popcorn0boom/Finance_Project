@@ -103,22 +103,60 @@ def add_transaction(conn, auto=False, auto_data=None):
         conn.rollback()
         return False
 
+# def show_summary(conn):
+#     """ 显示本月汇总 """
+#     cur = conn.cursor()
+#     # 本月总收入
+#     cur.execute("SELECT SUM(amount) FROM transactions WHERE type='income' AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now')")
+#     total_income = cur.fetchone()[0] or 0.0
+#     # 本月总支出
+#     cur.execute("SELECT SUM(amount) FROM transactions WHERE type='expense' AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now')")
+#     total_expense = cur.fetchone()[0] or 0.0
+#
+#     print(f"\n--- 本月汇总 ({datetime.date.today().strftime('%Y-%m')}) ---")
+#     print(f"总收入: {total_income:.2f} 元")
+#     print(f"总支出: {total_expense:.2f} 元")
+#     print(f"当前结余: {total_income - total_expense:.2f} 元")
 
-def show_summary(conn):
-    """ 显示本月汇总 """
+def show_summary(conn, gui_mode=False):
+    """ 返回字典格式的数据以便GUI显示 """
+    summary = {
+        "month": datetime.date.today().strftime("%Y-%m"),
+        "income": 0.0,
+        "expense": 0.0,
+        "balance": 0.0
+    }
+
     cur = conn.cursor()
     # 本月总收入
-    cur.execute("SELECT SUM(amount) FROM transactions WHERE type='income' AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now')")
-    total_income = cur.fetchone()[0] or 0.0
+    cur.execute("SELECT SUM(amount) FROM transactions WHERE type='income' AND strftime('%Y-%m', date) = ?",
+                (summary["month"],))
+    summary["income"] = cur.fetchone()[0] or 0.0
+
     # 本月总支出
-    cur.execute("SELECT SUM(amount) FROM transactions WHERE type='expense' AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now')")
-    total_expense = cur.fetchone()[0] or 0.0
+    cur.execute("SELECT SUM(amount) FROM transactions WHERE type='expense' AND strftime('%Y-%m', date) = ?",
+                (summary["month"],))
+    summary["expense"] = cur.fetchone()[0] or 0.0
 
-    print(f"\n--- 本月汇总 ({datetime.date.today().strftime('%Y-%m')}) ---")
-    print(f"总收入: {total_income:.2f} 元")
-    print(f"总支出: {total_expense:.2f} 元")
-    print(f"当前结余: {total_income - total_expense:.2f} 元")
+    summary["balance"] = summary["income"] - summary["expense"]
 
+    return summary if gui_mode else print_summary(summary)  # 命令行模式保持原样
+
+def set_salary(conn, payday, amount):
+    """ 供GUI调用的设置薪资函数 """
+    try:
+        cur = conn.cursor()
+        # 停用旧设置
+        cur.execute("UPDATE salary_settings SET is_active = 0 WHERE is_active = 1")
+        # 插入新记录
+        cur.execute('''INSERT INTO salary_settings(payday, amount, start_date, is_active)
+                     VALUES(?,?,?,1)''',
+                   (payday, amount, datetime.date.today().isoformat()))
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        print(f"设置薪资失败: {e}")
+        return False
 
 def show_history(conn):
     """ 查看历史记录 """
@@ -134,29 +172,26 @@ def show_history(conn):
     for idx, (date, trans_type, amount, category) in enumerate(records, 1):
         print(f"{idx}. [{date}] {trans_type.upper()} - ¥{amount:.2f} ({category})")
 
-
-# main.py
-def manage_salary(conn):
-    """ 薪资管理主菜单 """
-    while True:
-        print("\n=== 薪资管理 ===")
-        print("1. 设置/修改发薪日")
-        print("2. 调整本月薪资")
-        print("3. 查看历史薪资设置")
-        print("4. 返回主菜单")
-        choice = input("请选择操作: ")
-
-        if choice == '1':
-            set_payday(conn)
-        elif choice == '2':
-            adjust_current_salary(conn)
-        elif choice == '3':
-            show_salary_history(conn)
-        elif choice == '4':
-            break
-        else:
-            print("无效输入！")
-
+# def manage_salary(conn):
+#     """ 薪资管理主菜单 """
+#     while True:
+#         print("\n=== 薪资管理 ===")
+#         print("1. 设置/修改发薪日")
+#         print("2. 调整本月薪资")
+#         print("3. 查看历史薪资设置")
+#         print("4. 返回主菜单")
+#         choice = input("请选择操作: ")
+#
+#         if choice == '1':
+#             set_payday(conn)
+#         elif choice == '2':
+#             adjust_current_salary(conn)
+#         elif choice == '3':
+#             show_salary_history(conn)
+#         elif choice == '4':
+#             break
+#         else:
+#             print("无效输入！")
 
 def set_payday(conn):
     """ 设置发薪日逻辑 """
@@ -191,7 +226,6 @@ def set_payday(conn):
     conn.commit()
 
     print(f"已更新！新的发薪日设置为每月 {new_payday} 号，月薪 {new_amount} 元")
-
 
 def adjust_current_salary(conn):
     """ 调整当前生效薪资 """
@@ -233,7 +267,6 @@ def adjust_current_salary(conn):
 
     print(f"本月薪资已调整为 {new_amount} 元（原金额 {old_amount} 元）")
 
-
 def show_salary_history(conn):
     """ 显示历史薪资设置 """
     cur = conn.cursor()
@@ -274,7 +307,6 @@ def auto_add_salary(conn):
                 'description': '月度工资'
             })
 
-
 def add_daily_defaults(conn):
     """ 添加每日默认收支项 """
     print("\n--- 设置每日默认收支 ---")
@@ -289,7 +321,6 @@ def add_daily_defaults(conn):
     cur.execute(sql, (trans_type, amount, category, desc))
     conn.commit()
     print("已添加每日默认项！")
-
 
 def apply_daily_defaults(conn):
     """ 应用今日默认项（在程序启动时调用）"""
@@ -315,69 +346,129 @@ def apply_daily_defaults(conn):
                 'description': desc
             })
 
+# def set_budget_alert(conn):
+#     """ 设置月度预算 """
+#     budget = input("请输入月度支出预警金额（留空不设置）: ")
+#     if not budget:
+#         return
+#
+#     try:
+#         budget = float(budget)
+#     except:
+#         print("无效金额！")
+#         return
+#
+#     # 更新或插入记录
+#     cur = conn.cursor()
+#     cur.execute("SELECT id FROM budget_alert")
+#     if cur.fetchone():
+#         sql = "UPDATE budget_alert SET monthly_budget = ?"
+#     else:
+#         sql = "INSERT INTO budget_alert(monthly_budget) VALUES(?)"
+#     cur.execute(sql, (budget,))
+#     conn.commit()
 
-def set_budget_alert(conn):
-    """ 设置月度预算 """
-    budget = input("请输入月度支出预警金额（留空不设置）: ")
-    if not budget:
-        return
 
-    try:
-        budget = float(budget)
-    except:
-        print("无效金额！")
-        return
+# def check_budget_alert(conn):
+#     """ 检查是否超支（在查看汇总时自动调用）"""
+#     cur = conn.cursor()
+#
+#     # 1. 获取预警设置
+#     cur.execute("SELECT monthly_budget, last_alert_month FROM budget_alert")
+#     result = cur.fetchone()
+#
+#     # 无预警设置时直接返回
+#     if not result or result[0] is None:
+#         return
+#
+#     budget, last_alert_month = result
+#     current_month = datetime.date.today().strftime("%Y-%m")
+#
+#     # 2. 检查是否需要提醒（允许 last_alert_month 为 NULL）
+#     if last_alert_month == current_month:
+#         return  # 本月已提醒过
+#
+#     # 3. 计算本月总支出
+#     cur.execute('''SELECT SUM(amount) FROM transactions
+#                  WHERE type='expense' AND strftime('%Y-%m', date) = ?''',
+#                 (current_month,))
+#     total_expense = cur.fetchone()[0] or 0.0
+#
+#     # 4. 触发预警
+#     if total_expense > budget:
+#         print(f"\n⚠️ 警告：本月支出已超预算！（预算: {budget} 元，实际: {total_expense:.2f} 元）")
+#
+#         # 5. 更新提醒月份（处理 NULL 值）
+#         if last_alert_month is None:
+#             # 如果表中字段初始为 NULL，需特殊处理
+#             cur.execute("UPDATE budget_alert SET last_alert_month = ? WHERE id = 1",
+#                         (current_month,))
+#         else:
+#             cur.execute("UPDATE budget_alert SET last_alert_month = ?",
+#                         (current_month,))
+#         conn.commit()
 
-    # 更新或插入记录
+def set_budget_alert(conn, amount):
+    """ 设置预警金额 """
     cur = conn.cursor()
+    # 检查是否存在记录
     cur.execute("SELECT id FROM budget_alert")
     if cur.fetchone():
         sql = "UPDATE budget_alert SET monthly_budget = ?"
     else:
         sql = "INSERT INTO budget_alert(monthly_budget) VALUES(?)"
-    cur.execute(sql, (budget,))
-    conn.commit()
 
+    try:
+        cur.execute(sql, (amount,))
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        print(f"设置预警失败: {e}")
+        return False
 
-def check_budget_alert(conn):
-    """ 检查是否超支（在查看汇总时自动调用）"""
+def get_budget_alert_status(conn):
+    """
+    获取当前预算预警状态
+    返回格式:
+        {
+            "is_over": bool,      # 是否超支
+            "budget": float,      # 预算金额
+            "current": float,     # 当前支出
+            "month": str          # 当前月份 (YYYY-MM)
+        }
+    """
     cur = conn.cursor()
-
-    # 1. 获取预警设置
     cur.execute("SELECT monthly_budget, last_alert_month FROM budget_alert")
     result = cur.fetchone()
 
-    # 无预警设置时直接返回
+    status = {
+        "is_over": False,
+        "budget": 0.0,
+        "current": 0.0,
+        "month": datetime.date.today().strftime("%Y-%m")
+    }
+
     if not result or result[0] is None:
-        return
+        return status
 
     budget, last_alert_month = result
-    current_month = datetime.date.today().strftime("%Y-%m")
+    status["budget"] = budget
 
-    # 2. 检查是否需要提醒（允许 last_alert_month 为 NULL）
-    if last_alert_month == current_month:
-        return  # 本月已提醒过
-
-    # 3. 计算本月总支出
+    # 计算本月支出
     cur.execute('''SELECT SUM(amount) FROM transactions 
                  WHERE type='expense' AND strftime('%Y-%m', date) = ?''',
-                (current_month,))
+                (status["month"],))
     total_expense = cur.fetchone()[0] or 0.0
+    status["current"] = total_expense
 
-    # 4. 触发预警
-    if total_expense > budget:
-        print(f"\n⚠️ 警告：本月支出已超预算！（预算: {budget} 元，实际: {total_expense:.2f} 元）")
-
-        # 5. 更新提醒月份（处理 NULL 值）
-        if last_alert_month is None:
-            # 如果表中字段初始为 NULL，需特殊处理
-            cur.execute("UPDATE budget_alert SET last_alert_month = ? WHERE id = 1",
-                        (current_month,))
-        else:
-            cur.execute("UPDATE budget_alert SET last_alert_month = ?",
-                        (current_month,))
+    # 判断是否需要提示（允许首次提示或新月）
+    if (last_alert_month != status["month"]) and (total_expense > budget):
+        status["is_over"] = True
+        # 更新提醒状态（避免重复提示）
+        cur.execute("UPDATE budget_alert SET last_alert_month = ?", (status["month"],))
         conn.commit()
 
+    return status
 
 def main():
     conn = create_connection()

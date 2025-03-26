@@ -24,13 +24,49 @@ def create_tables(conn):
         description TEXT           -- 备注
     );
     """
-    try:
-        c = conn.cursor()
-        c.execute(sql_create_transactions_table)
-        conn.commit()
-        print("数据表创建成功！")
-    except Error as e:
-        print(f"创建表失败: {e}")
+
+    # 新增薪资设置表
+    sql_create_salary_table = """
+        CREATE TABLE IF NOT EXISTS salary_settings (
+            id INTEGER PRIMARY KEY,
+            payday INTEGER NOT NULL CHECK(payday BETWEEN 1 AND 31),  -- 发薪日（1-31日）
+            amount REAL NOT NULL,
+            start_date TEXT NOT NULL,   -- 生效起始日期
+            is_active BOOLEAN DEFAULT 1 -- 是否生效
+        );
+        """
+
+    # 新增每日默认收支表
+    sql_create_defaults_table = """
+        CREATE TABLE IF NOT EXISTS daily_defaults (
+            id INTEGER PRIMARY KEY,
+            type TEXT CHECK(type IN ('income', 'expense')),
+            amount REAL NOT NULL,
+            category TEXT,
+            description TEXT,
+            is_active BOOLEAN DEFAULT 1
+        );
+        """
+
+    # 新增预警设置表
+    sql_create_alert_table = """
+        CREATE TABLE IF NOT EXISTS budget_alert (
+            id INTEGER PRIMARY KEY,
+            monthly_budget REAL,
+            last_alert_month TEXT  -- 上次提醒月份（防止重复提醒）
+        );
+        """
+
+    # 执行所有建表语句
+    tables = [sql_create_salary_table, sql_create_defaults_table, sql_create_alert_table]
+    for table in tables:
+        try:
+            c = conn.cursor()
+            c.execute(table)
+            conn.commit()
+            print("数据表创建成功！")
+        except Error as e:
+            print(f"创建表失败: {e}")
 
 # 测试数据库初始化
 if __name__ == "__main__":
